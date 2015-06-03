@@ -34,8 +34,11 @@ class Tree(object):
     def __repr__(self):
         return self.root.get_tree()
 
-    def absolute(self, url):
-        return urljoin(self.root.url, url)
+    def absolute(self, parent_url, url):
+        if parent_url:
+            return urljoin(parent_url, url)
+        else:
+            return urljoin(self.root.url, url)
 
     def build_tree(self, root=None):
         if root is None:
@@ -45,30 +48,31 @@ class Tree(object):
         except UnicodeEncodeError:
             print ("UnicodeEncodeError in url: " , root.url)
             return []
+        except KeyboardInterrupt:
+            print ("user interrupted")
+            exit(-1)
         except:
             print ("Unexpected Error with url: " , root.url)
             return []
 
-        soup = BeautifulSoup(r.data.decode('ISO-8859-1'), "lxml")
-        cur_level_links =  [self.absolute(link['href']) for link in soup.findAll('a') if link.has_attr('href')
-                            and same_domain(self.root.url, urljoin(self.root.url, link['href']))
-                            and self.absolute(link['href']) not in self.collected_urls]
+        if root.url not in self.collected_urls:
+            self.collected_urls.append(root.url)
 
+        soup = BeautifulSoup(r.data.decode('ISO-8859-1'), "lxml")
+        cur_level_links =  [self.absolute(root.url, link['href']) for link in soup.findAll('a') if link.has_attr('href')
+                            and same_domain(self.root.url, urljoin(self.root.url, link['href']))
+                            and self.absolute(root.url, link['href']) not in self.collected_urls]
+
+        #print ("root: ", root.url, "    parent: ", root.parent , "children: ", len(cur_level_links))
+        #print(len(self.collected_urls))
         self.collected_urls += cur_level_links
 
         children = []
-        for link in soup.findAll('a'):
-            if link.has_attr('href'):
-                absolute_link = self.absolute(link['href'])
-                if same_domain(self.root.url,absolute_link):
-                    if absolute_link not in self.collected_urls:
-                        cur_level_links.append(absolute_link)
-                        rl = RoutedLink(absolute_link, root)
-                        rl.children = self.build_tree(rl)
-                        children.append(rl)
-
         for l in cur_level_links:
             rl = RoutedLink(l, root)
+            if not rl.eslam_site_found():
+                print ("[Kaputter Link:] ", l , "")
+                print ("       Link steht auf Seite: ", root.url ,"\n")
             rl.children = self.build_tree(rl)
             children.append(rl)
 
@@ -90,11 +94,25 @@ class RoutedLink(object):
         self.url = url
 
         self.children = children
-        if parent is not None:
-            self.parent = parent
+
+        self.parent = parent
 
     def __repr__(self):
         return "RoutedLink: \"" + self.url + "\""
+
+    def eslam_site_found(self):
+        try:
+            r = self.http.request("GET", self.url)
+        except UnicodeEncodeError:
+            print ("UnicodeEncodeError in url: " , self.url)
+            return []
+        soup = BeautifulSoup(r.data.decode('ISO-8859-1'), "lxml")
+        txt = soup.get_text()
+        wrong_url_txt = '\n\n\n\n\n\nEnzyklopädie des Islam\n\n\n\n\n\n\n\n\n\n\xa0\n\n\n\n\n\xa0\n\n\n\xa0\n\n\n\n\n\n\n\n\r\n            Hinweis\n\n\n\n\n\n\n\nStartseite\n\n\nSuche\n\n\nImpressum\n\n\n\n\n\n\n\n\n\n\n\n\n\nSehr geehrter Besucher der \r\n        Enzyklopädie des Islam,\ndie von Ihnen gewählte Seite \r\n        existiert leider nicht (mehr) \r\n        auf unserem Server.\nBitte informieren sie uns, woher der Link stammt, damit wir \r\n        die Seite ggf. korrigieren können. Über eine\r\n        Information per e-Mail an\r\n        \r\n        info@eslam.de\xa0\xa0\r\n        bezüglich des defekten Links wären wir sehr dankbar.\nZu unserer Homepage gelangen Sie unter\r\n        www.eslam.de \nIhre \r\n        Enzyklopädie des Islam\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n© 2006-2009 - \r\nm-haditec GmbH & \r\nCo KG - \ninfo@eslam.de\n\n\n\n\n\n\n\n\n\n\n\n'
+        if txt == wrong_url_txt:
+            return False
+        return True
+
 
     def insert_child(self, child_node):
         self.children.append(child_node)
@@ -106,7 +124,7 @@ class RoutedLink(object):
             return [child] + child.get_tree()
 
     def depth(self):
-        if hasattr(self, 'parent'):
+        if self.parent is not None:
             return  1 + self.parent.depth()
         else:
             return 0
@@ -155,6 +173,7 @@ if __name__ == '__main__':
     print ("##############################")
     tree = Tree(r0)
     result = tree.build_tree()
+    print ("length: " , len(result))
     #for r in result:
     #    print (r)
     #    print ("anzahl children: ", len(r.children))
