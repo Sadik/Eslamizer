@@ -1,9 +1,14 @@
 __author__ = 'sadik'
 import re
 import string
+import os
 import urllib3
 from urllib3 import PoolManager
+import urllib
 from urllib.parse import urljoin, urlparse
+from urllib.error import URLError
+import requests
+
 from bs4.element import Comment
 from bs4 import BeautifulSoup
 
@@ -11,17 +16,53 @@ from bs4 import BeautifulSoup
 def same_domain(url1, url2):
     return get_domain_name(url1) == get_domain_name(url2)
 
+
 def get_domain_name(url):
+    """return domain of url
+    needs to be called with absolute path
+    :param url: string
+    :return: string
+    """
     parsed_uri = urlparse(url)
     if parsed_uri.scheme and parsed_uri.netloc:
         return '{uri.scheme}://{uri.netloc}/'.format(uri=parsed_uri)
 
-    return get_domain_name("http://" + url)
+    if (not parsed_uri.scheme) and parsed_uri.netloc:
+        return 'http://{uri.netloc}/'.format(uri=parsed_uri)
+
+def clear_url(url):
+    """
+    removes unnecessary parts of url, like query or fragment
+    example clear_url("www.offenkundiges.de/ueber-uns/#top")
+      results in: "http://www.offenkundiges.de/ueber-uns/"
+    :param url: string
+    :return: string
+    """
+    parsed_uri = urlparse(url)
+    if parsed_uri.scheme and parsed_uri.netloc:
+        return '{uri.scheme}://{uri.netloc}{uri.path}'.format(uri=parsed_uri)
+    elif parsed_uri.netloc and parsed_uri.path:
+        return 'http://{uri.netloc}{uri.path}'.format(uri=parsed_uri)
+    else:
+        return 'http://{uri.path}'.format(uri=parsed_uri)
+
+def url_exists(url):
+    """
+    checks for 404 error
+    only works with http:// or https://
+    :param url: string
+    :return: bool
+    """
+    try:
+        return requests.get(url).status_code != 404
+    except:
+        return False
 
 
 class Tree(object):
 
     http = urllib3.PoolManager()
+    just_fun = []
     collected_urls = [] #[string]
     collected_rl = {}
     ignore_url = "http://www.eslam.de/arab/"
@@ -51,12 +92,75 @@ class Tree(object):
         else:
             return urljoin(self.root.url, url)
 
-    def build_tree(self, root=None):
-        print ("depth:",root.depth(), root.depth()*"  ", root.url)
-        if root is None:
-            root = self.root
+    def start(self):
+        print("Start building up tree")
+        root_node = self.create_tree(self.root.url)
+        print("Tree built up: ", root_node)
+        return root_node
+
+    def create_tree(self, url=None, parent_node=None):
+
+        """
+
+        :param url: string
+        :param parent_node: RoutedLink
+        :return: RoutedLink
+        """
+        if url is None:
+            print ("[URL] creating tree with default root url")
+            url = self.root.url
+
         try:
-            r = self.http.request("GET", root.url)
+            r = requests.get(url)
+            r.encoding = 'ISO-8859-1'
+        except UnicodeEncodeError:
+            print ("UnicodeEncodeError in url: " , url)
+            #if type(self) == RoutedLink and self.parent is not None:
+            #    print ("     Link steht auf: ", self.parent.url, "\n")
+            return [] #TODO: check if return of empty list is correct
+        except KeyboardInterrupt:
+            print ("user interrupted")
+            exit(-1)
+        except:
+            print ("Unexpected Error with url: " , url)
+            return [] #TODO: check if return of empty list is correct
+
+        if r.status_code == 404:
+            print ("[URL] 404 Error on ", url)
+            print ("     comming from: ", parent_node.url)
+            return [] #TODO: check if return of empty list is correct
+
+        rl = RoutedLink(url, parent_node)
+        if parent_node is not None:
+            parent_node.insert_child(rl)
+
+        soup = BeautifulSoup(r.text, "lxml")
+
+        for link in soup.findAll('a'):
+            if link.has_attr('href'):
+                clear_link = clear_url(self.absolute(rl.url, link['href']))
+                fileName, fileExt = os.path.splitext(clear_link)
+                if fileExt.lower() in [".jpg", ".png", ".gif"]:
+                    continue
+                if same_domain(self.root.url, clear_link):
+                    if clear_link != url:
+                        if clear_link not in self.collected_urls:
+                            self.collected_urls.append(clear_link)
+                            self.create_tree(clear_link, rl)
+                            self.just_fun.append(rl)
+                            self.collected_rl[rl.url] = rl.depth()
+
+        #print (rl.url, " with parent: ", rl.parent, " and depth: ", rl.depth())
+        return rl
+
+    def build_tree(self, root_url=None, parent=None):
+        rl = RoutedLink(root_url, parent)
+        print ("depth:",rl.depth(), rl.depth()*"  ", rl.url)
+
+        if root_url is None:
+            root_url = self.root.url
+        try:
+            r = self.http.request("GET", rl.url)
         except UnicodeEncodeError:
             #print ("UnicodeEncodeError in url: " , root.url)
             #if type(self) == RoutedLink and self.parent is not None:
@@ -69,25 +173,25 @@ class Tree(object):
             #print ("Unexpected Error with url: " , root.url)
             return []
 
-        if root.url not in self.collected_urls:
-            self.collected_urls.append(root.url)
+        if rl.url not in self.collected_urls:
+            self.collected_urls.append(rl.url)
 
         soup = BeautifulSoup(r.data.decode('ISO-8859-1'), "lxml")
-        cur_level_links =  [self.absolute(root.url, link['href']) for link in soup.findAll('a') if link.has_attr('href')
-                            and same_domain(self.root.url, urljoin(self.root.url, link['href']))
-                            and self.absolute(root.url, link['href']) not in self.collected_urls]
-
-        self.collected_urls += cur_level_links
 
         children = []
-        for l in cur_level_links:
-            rl = RoutedLink(l, root)
-            #if not rl.eslam_site_found():
-            #print ("[Kaputter Link:] ", l)
-            #print ("       Link steht auf Seite: ", root.url ,"\n")
-            rl.children = self.build_tree(rl)
-            children.append(rl)
-            self.collected_rl[rl.url] = rl.depth()
+        for link in soup.findAll('a'):
+            if link.has_attr('href'):
+                if same_domain(self.root.url, self.absolute(self.root.url, link['href'])):
+                    clear_link = clear_url(self.absolute(rl.url, link['href']))
+                    if clear_link not in self.collected_urls:
+                        self.collected_urls.append(clear_link)
+
+                        self.build_tree(clear_link, rl)
+
+                        children.append(rl)
+                        rl_children = self.build_tree(rl)
+                        self.just_fun.append(rl)
+                        self.collected_rl[rl.url] = rl.depth()
 
         return children
 
@@ -127,6 +231,8 @@ class RoutedLink(object):
             return False
         return True
 
+    def insert_children(self, children):
+        self.children += children
 
     def insert_child(self, child_node):
         self.children.append(child_node)
@@ -186,10 +292,9 @@ if __name__ == '__main__':
     print ("depth: ", r3.depth())
     print ("##############################")
 
-    r = RoutedLink("http://www.offenkundiges.de/")
+    r = RoutedLink("http://www.offenkundiges.de")
     tree = Tree(r)
-    tree.build_tree(r)
-    tree.print_tree(tree.root)
+    tree.start()
 
     #for r in result:
     #    print (r)
