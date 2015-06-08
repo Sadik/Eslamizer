@@ -96,6 +96,7 @@ class Tree(object):
         print("Start building up tree")
         root_node = self.create_tree(self.root.url)
         print("Tree built up: ", root_node)
+        self.print_tree(root_node)
         return root_node
 
     def create_tree(self, url=None, parent_node=None):
@@ -161,7 +162,7 @@ class Tree(object):
 class RoutedLink(object):
     http = urllib3.PoolManager()
 
-    def __init__(self, url, parent=None, children=[]):
+    def __init__(self, url, parent=None, children=None):
         """
 
         :param url: string
@@ -171,7 +172,8 @@ class RoutedLink(object):
         """
         #if url.endswith('/'): # problem with urljoin
         self.url = url
-
+        if children is None:
+            children = []
         self.children = children
 
         self.parent = parent
