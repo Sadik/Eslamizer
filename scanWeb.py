@@ -1,6 +1,7 @@
 __author__ = 'sadik'
-import re
-import string
+#import re
+#import string
+import sys
 import os
 import urllib3
 from urllib3 import PoolManager
@@ -63,9 +64,8 @@ class Tree(object):
 
     http = urllib3.PoolManager()
     just_fun = []
-    collected_urls = [] #[string]
+    collected_urls = [] #[string] --list of urls
     collected_rl = {}
-    ignore_url = "http://www.eslam.de/arab/"
 
     def __init__(self, root):
         """
@@ -123,11 +123,15 @@ class Tree(object):
             exit(-1)
         except:
             print ("Unexpected Error with url: " , url)
+            print( sys.exc_info()[0])
             return [] #TODO: check if return of empty list is correct
 
         if r.status_code == 404:
             print ("[URL] 404 Error on ", url)
-            print ("     comming from: ", parent_node.url)
+            try:
+                print ("     comming from: ", parent_node.url)
+            except AttributeError:
+                print ("      root url returns 404")
             return [] #TODO: check if return of empty list is correct
 
         rl = RoutedLink(url, parent_node)
@@ -152,48 +156,6 @@ class Tree(object):
 
         #print (rl.url, " with parent: ", rl.parent, " and depth: ", rl.depth())
         return rl
-
-    def build_tree(self, root_url=None, parent=None):
-        rl = RoutedLink(root_url, parent)
-        print ("depth:",rl.depth(), rl.depth()*"  ", rl.url)
-
-        if root_url is None:
-            root_url = self.root.url
-        try:
-            r = self.http.request("GET", rl.url)
-        except UnicodeEncodeError:
-            #print ("UnicodeEncodeError in url: " , root.url)
-            #if type(self) == RoutedLink and self.parent is not None:
-            #    print ("     Link steht auf: ", self.parent.url, "\n")
-            return []
-        except KeyboardInterrupt:
-            #print ("user interrupted")
-            exit(-1)
-        except:
-            #print ("Unexpected Error with url: " , root.url)
-            return []
-
-        if rl.url not in self.collected_urls:
-            self.collected_urls.append(rl.url)
-
-        soup = BeautifulSoup(r.data.decode('ISO-8859-1'), "lxml")
-
-        children = []
-        for link in soup.findAll('a'):
-            if link.has_attr('href'):
-                if same_domain(self.root.url, self.absolute(self.root.url, link['href'])):
-                    clear_link = clear_url(self.absolute(rl.url, link['href']))
-                    if clear_link not in self.collected_urls:
-                        self.collected_urls.append(clear_link)
-
-                        self.build_tree(clear_link, rl)
-
-                        children.append(rl)
-                        rl_children = self.build_tree(rl)
-                        self.just_fun.append(rl)
-                        self.collected_rl[rl.url] = rl.depth()
-
-        return children
 
 
 class RoutedLink(object):
@@ -292,7 +254,7 @@ if __name__ == '__main__':
     print ("depth: ", r3.depth())
     print ("##############################")
 
-    r = RoutedLink("http://www.offenkundiges.de")
+    r = RoutedLink("http://www.eslamica.de")
     tree = Tree(r)
     tree.start()
 
